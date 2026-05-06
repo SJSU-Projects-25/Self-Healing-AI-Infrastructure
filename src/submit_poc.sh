@@ -5,7 +5,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --time=00:30:00
 #SBATCH --mem=32G
-#SBATCH --nodelist=g8,g10,g11
+#SBATCH --nodelist=g4,g11,g5
 #SBATCH --output=lens_poc_%j.log
 #SBATCH --error=lens_poc_%j.err
 #SBATCH --partition=gpuqs

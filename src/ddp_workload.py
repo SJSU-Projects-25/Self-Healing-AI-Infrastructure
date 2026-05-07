@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-LENS POC — DDP Workload
-=======================
-A minimal PyTorch Distributed Data Parallel (DDP) training job
-designed to drive sustained GPU utilization across all nodes so
-the telemetry poller can observe meaningful GPU and IB counter changes.
+LENS POC — Data Parallel Training Job
+=====================================
+A minimal PyTorch data parallel training job designed to drive
+sustained GPU utilization across all nodes so the telemetry poller
+can observe meaningful GPU and InfiniBand counter changes.
 
 Model: Small ResNet-style CNN (no pretrained weights needed)
 Data:  Synthetic random tensors (no dataset download required)
 
 Usage (launched via srun in submit_poc.sh — do not run directly):
-  srun python3 ddp_workload.py --master-addr <host> --master-port 29500
+    srun python3 ddp_workload.py --master-addr <host> --master-port 29500
 """
 
 import argparse
@@ -70,7 +70,7 @@ class SmallResNet(nn.Module):
         return self.fc(x)
 
 
-# ── DDP setup / teardown ─────────────────────────────────────────────────────
+# ── Distributed training setup / teardown ───────────────────────────────────
 
 def setup_ddp(rank: int, world_size: int, master_addr: str, master_port: str):
     os.environ["MASTER_ADDR"] = master_addr
@@ -95,7 +95,7 @@ def train(args):
     world_size = int(os.environ.get("SLURM_NTASKS",    1))
     local_rank = int(os.environ.get("SLURM_LOCALID",   0))
 
-    print(f"[rank {rank}/{world_size}] Initializing DDP on {args.master_addr}:{args.master_port}")
+    print(f"[rank {rank}/{world_size}] Initializing data parallel training on {args.master_addr}:{args.master_port}")
     setup_ddp(rank, world_size, args.master_addr, str(args.master_port))
 
     device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
@@ -154,11 +154,11 @@ def train(args):
 # ── Entry point ──────────────────────────────────────────────────────────────
 
 def parse_args():
-    p = argparse.ArgumentParser(description="LENS DDP workload")
+    p = argparse.ArgumentParser(description="LENS data parallel training job")
     p.add_argument("--epochs",      type=int,   default=999,      help="Number of training epochs")
     p.add_argument("--batch-size",  type=int,   default=64,       help="Per-GPU batch size")
-    p.add_argument("--master-addr", type=str,   default="localhost", help="DDP master node hostname")
-    p.add_argument("--master-port", type=int,   default=29500,    help="DDP master port")
+    p.add_argument("--master-addr", type=str,   default="localhost", help="Master node hostname for the training job")
+    p.add_argument("--master-port", type=int,   default=29500,    help="Master port for the training job")
     return p.parse_args()
 
 

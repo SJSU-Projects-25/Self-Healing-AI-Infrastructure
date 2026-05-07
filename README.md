@@ -26,13 +26,13 @@ src/
 ├── submit_poc.sh          # SLURM batch script — job orchestration
 ├── run_node.sh            # Per-node wrapper — process lifecycle management
 ├── telemetry_poller.py    # Core telemetry agent — GPU + IB counter collection
-├── ddp_workload.py        # Synthetic DDP training workload — GPU load generator
+├── ddp_workload.py        # Synthetic data parallel training job — GPU load generator
 ├── preflight_check.py     # Pre-submission sanity checker
 ├── results/               # Output directory — created at runtime
 │   └── <JOBID>/
 │       ├── telemetry_<node>_<JOBID>.csv
 │       ├── poller_<node>_<task>.log
-│       └── ddp_<node>_<task>.log
+│       └── ddp_<node>_<task>.log   # training job output log
 └── README.md
 ```
  
@@ -261,12 +261,12 @@ The following fault scenarios are planned to generate labeled training data for 
  
 | Label | Scenario | Method | Status |
 |---|---|---|---|
-| 0 | Healthy training | Normal DDP run | ✅ Done |
+| 0 | Healthy training | Normal data parallel training run | ✅ Done |
 | 1 | Normal AllReduce pause | Observed during training | ✅ Done |
 | 2 | Network-induced stall | Apptainer tc/netem delay | ⏳ Planned |
 | 3 | Physical link error | Apptainer tc/netem loss | ⏳ Planned |
 | 4 | Compute fault | CUDA sync barrier delay | ⏳ Planned |
-| 5 | Idle | Poller with no DDP job | ⏳ Planned |
+| 5 | Idle | Poller with no data parallel training job | ⏳ Planned |
  
 ---
  
@@ -296,8 +296,8 @@ sinfo -o "%P %a %l %D %t %N" | grep gpuqs
 ### GPU utilization stuck at 0%
 ```bash
 cat results/<JOBID>/ddp_*.log
-# No DDP logs     → srun step failed, check .err file
-# DDP logs exist  → NCCL initialization hung, check master node resolution
+# No training job logs  → srun step failed, check .err file
+# Training job logs exist → NCCL initialization hung, check master node resolution
 ```
  
 ### Wrong IB device name
@@ -313,7 +313,7 @@ exit
 ## Design Notes
  
 **Why single srun architecture?**
-The SLURM version on HPC3 does not support concurrent srun steps on the same allocation. Running the poller and DDP workload as two separate srun calls results in the second step being blocked. Both processes are co-located inside a single srun via `run_node.sh`, which starts the poller as a background process and DDP as the foreground process on each node.
+The SLURM version on HPC3 does not support concurrent srun steps on the same allocation. Running the poller and data parallel training job as two separate srun calls results in the second step being blocked. Both processes are co-located inside a single srun via `run_node.sh`, which starts the poller as a background process and the training job as the foreground process on each node.
  
 **Why sysfs over RDMA APIs?**
 IB counters are read directly from sysfs rather than via libibverbs or any RDMA management API. This eliminates all privilege requirements and removes dependency on the IB software stack beyond what the kernel driver exposes by default.

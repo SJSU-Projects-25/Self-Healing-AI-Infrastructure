@@ -270,6 +270,36 @@ The following fault scenarios are planned to generate labeled training data for 
  
 ---
  
+## How to Access the Dashboard
+ 
+The dashboard provides an interactive interface for exploring telemetry data and incident analysis.
+
+### Prerequisites
+
+Install dependencies from the repo root:
+
+```bash
+pip install -r requirements.txt
+```
+
+### Running the Dashboard
+
+From the repo root directory, run:
+
+```bash
+streamlit run dashboard_app.py
+```
+
+The dashboard will automatically open in your browser at **http://localhost:8501**.
+
+### Dashboard Features
+
+- **Overview Tab** — KPIs and time-series plots of GPU utilization and network throughput across all nodes
+- **Node Drilldown Tab** — Per-node detailed metrics with incident markers
+- **Insights Tab** — Correlation heatmap and anomaly detection results
+
+---
+ 
 ## Debugging
  
 ### Job completes in under 10 seconds

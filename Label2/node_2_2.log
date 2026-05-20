@@ -1,0 +1,8 @@
+[g11.hpc.coe] Starting poller for network stall collection...
+[g11.hpc.coe] Poller started with PID 150665
+[g11.hpc.coe] Starting DDP with stall injection — master=g4:29500
+[g11.hpc.coe] Stall config: rank=1 every=5 duration=4.0s
+[INFO] hw_counters available: ['lifespan', 'rq_num_dup', 'rq_num_lle', 'rq_num_lpe', 'rq_num_lqpoe', 'rq_num_oos', 'rq_num_rae', 'rq_num_rire', 'rq_num_rnr', 'rq_num_wrfe', 'sq_num_bre', 'sq_num_lle', 'sq_num_lpe', 'sq_num_lqpoe', 'sq_num_mwbe', 'sq_num_oos', 'sq_num_rae', 'sq_num_rire', 'sq_num_rnr', 'sq_num_roe', 'sq_num_rree', 'sq_num_to', 'sq_num_tree', 'sq_num_wrfe']
+[INFO] Writing telemetry to /home/018291533/lens_poc/results/stall_43337/telemetry_g11.hpc.coe_43337.csv
+[INFO] Poller v2 started on g11.hpc.coe | IB=mlx4_0:1 | interval=0.5s | counters=17 IB + 4 HW
+[INFO] Poller stopped on g11.hpc.coe.

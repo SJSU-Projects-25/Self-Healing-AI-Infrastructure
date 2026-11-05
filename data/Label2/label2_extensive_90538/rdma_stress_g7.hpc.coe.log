@@ -1,0 +1,28 @@
+[g7.hpc.coe] RDMA client connecting to g2
+Conflicting CPU frequency values detected: 3020.054000 != 3200.000000. CPU Frequency is not max.
+ WARNING: BW peak won't be measured in this run.
+---------------------------------------------------------------------------------------
+                    RDMA_Write Bidirectional BW Test
+ Dual-port       : OFF		Device         : mlx4_0
+ Number of qps   : 1		Transport type : IB
+ Connection type : RC		Using SRQ      : OFF
+ PCIe relax order: ON		Lock-free      : OFF
+ WARNING: CPU is not PCIe relaxed ordering compliant.
+ WARNING: You should disable PCIe RO with `--disable_pcie_relaxed` for both server and client.
+ ibv_wr* API     : OFF		Using Enhanced Reorder      : OFF
+ TX depth        : 128
+ CQ Moderation   : 1
+ CQE Poll Batch  : Dynamic
+ Mtu             : 2048[B]
+ Link type       : IB
+ Max inline data : 0[B]
+ rdma_cm QPs	 : OFF
+ Data ex. method : Ethernet
+---------------------------------------------------------------------------------------
+ local address: LID 0x20 QPN 0x061b PSN 0x42e783 RKey 0x6001141e VAddr 0x007fbe7cde2000
+ remote address: LID 0x1e QPN 0x6642 PSN 0xcb5865 RKey 0x8011443 VAddr 0x007f31bb29b000
+---------------------------------------------------------------------------------------
+ #bytes     #iterations    BW peak[MiB/sec]    BW average[MiB/sec]   MsgRate[Mpps]
+ 65536      2259484          0.00               4667.42		     0.074679
+---------------------------------------------------------------------------------------
+[g7.hpc.coe] RDMA client exited rc=0

@@ -1,0 +1,41 @@
+[g11.hpc.coe] extensive Label 2 rank=1 stress=0  delay=30s duration=90s  parameter_mb=64 device=mlx4_0:1
+[INFO] hw_counters available: ['lifespan', 'rq_num_dup', 'rq_num_lle', 'rq_num_lpe', 'rq_num_lqpoe', 'rq_num_oos', 'rq_num_rae', 'rq_num_rire', 'rq_num_rnr', 'rq_num_wrfe', 'sq_num_bre', 'sq_num_lle', 'sq_num_lpe', 'sq_num_lqpoe', 'sq_num_mwbe', 'sq_num_oos', 'sq_num_rae', 'sq_num_rire', 'sq_num_rnr', 'sq_num_roe', 'sq_num_rree', 'sq_num_to', 'sq_num_tree', 'sq_num_wrfe']
+[INFO] Writing telemetry to /home/018291533/lens_poc/results/label2_extensive_105153/telemetry_g11.hpc.coe_105153.csv
+[INFO] Poller v2 started on g11.hpc.coe | IB=mlx4_0:1 | interval=0.5s | counters=17 IB + 4 HW
+g11:4144810:4144810 [0] NCCL INFO cudaDriverVersion 12090
+g11:4144810:4144810 [0] NCCL INFO Bootstrap : Using ib0:172.16.3.211<0>
+g11:4144810:4144810 [0] NCCL INFO NET/Plugin: No plugin found (libnccl-net.so)
+g11:4144810:4144810 [0] NCCL INFO NET/Plugin: Using internal network plugin.
+g11:4144810:4144891 [0] NCCL INFO NET/IB : Using [0]mlx4_0:1/IB [RO]; OOB ib0:172.16.3.211<0>
+g11:4144810:4144891 [0] NCCL INFO Using non-device net plugin version 0
+g11:4144810:4144891 [0] NCCL INFO Using network IB
+g11:4144810:4144891 [0] NCCL INFO ncclCommInitRank comm 0x5581ffc99ee0 rank 1 nranks 2 cudaDev 0 nvmlDev 0 busId 4000 commId 0x4dec4423743247e0 - Init START
+g11:4144810:4144891 [0] NCCL INFO NET/IB : GPU Direct RDMA Disabled for HCA 0 'mlx4_0'
+g11:4144810:4144891 [0] NCCL INFO Setting affinity for GPU 0 to 555555,55555555
+g11:4144810:4144891 [0] NCCL INFO comm 0x5581ffc99ee0 rank 1 nRanks 2 nNodes 2 localRanks 1 localRank 0 MNNVL 0
+g11:4144810:4144891 [0] NCCL INFO Trees [0] -1/-1/-1->1->0 [1] 0/-1/-1->1->-1
+g11:4144810:4144891 [0] NCCL INFO P2P Chunksize set to 131072
+g11:4144810:4144893 [0] NCCL INFO New proxy recv connection 0 from local rank 0, transport 2
+g11:4144810:4144891 [0] NCCL INFO Connected to proxy localRank 0 -> connection 0x7fec78004f30
+g11:4144810:4144891 [0] NCCL INFO Channel 00/0 : 0[0] -> 1[0] [receive] via NET/IB/0
+g11:4144810:4144893 [0] NCCL INFO New proxy recv connection 1 from local rank 0, transport 2
+g11:4144810:4144891 [0] NCCL INFO Connected to proxy localRank 0 -> connection 0x7fec78004fa8
+g11:4144810:4144891 [0] NCCL INFO Channel 01/0 : 0[0] -> 1[0] [receive] via NET/IB/0
+g11:4144810:4144893 [0] NCCL INFO New proxy send connection 2 from local rank 0, transport 2
+g11:4144810:4144891 [0] NCCL INFO Connected to proxy localRank 0 -> connection 0x7fec78005020
+g11:4144810:4144891 [0] NCCL INFO Channel 00/0 : 1[0] -> 0[0] [send] via NET/IB/0
+g11:4144810:4144893 [0] NCCL INFO New proxy send connection 3 from local rank 0, transport 2
+g11:4144810:4144891 [0] NCCL INFO Connected to proxy localRank 0 -> connection 0x7fec78005098
+g11:4144810:4144891 [0] NCCL INFO Channel 01/0 : 1[0] -> 0[0] [send] via NET/IB/0
+g11:4144810:4144893 [0] NCCL INFO Call to ibv_query_ece failed with error Operation not supported errno 95
+g11:4144810:4144893 [0] NCCL INFO NET/IB: NCCL Dev 0 IbDev 0 Port 1 qpn 1113 mtu 5 LID 31 fifoRkey=0x8801000e fifoLkey=0x8801000e
+g11:4144810:4144893 [0] NCCL INFO Call to ibv_query_ece failed with error Operation not supported errno 95
+g11:4144810:4144893 [0] NCCL INFO NET/IB: NCCL Dev 0 IbDev 0 Port 1 qpn 1114 mtu 5 LID 31 fifoRkey=0x8801010e fifoLkey=0x8801010e
+g11:4144810:4144893 [0] NCCL INFO Call to ibv_set_ece failed with error Operation not supported errno 95
+g11:4144810:4144891 [0] NCCL INFO Connected all rings
+g11:4144810:4144891 [0] NCCL INFO Connected all trees
+g11:4144810:4144891 [0] NCCL INFO threadThresholds 8/8/64 | 16/8/64 | 512 | 512
+g11:4144810:4144891 [0] NCCL INFO 2 coll channels, 2 collnet channels, 0 nvls channels, 2 p2p channels, 2 p2p channels per peer
+g11:4144810:4144893 [0] NCCL INFO New proxy send connection 4 from local rank 0, transport 2
+g11:4144810:4144891 [0] NCCL INFO Connected to proxy localRank 0 -> connection 0x7fec78005110
+g11:4144810:4144891 [0] NCCL INFO ncclCommInitRank comm 0x5581ffc99ee0 rank 1 nranks 2 cudaDev 0 nvmlDev 0 busId 4000 commId 0x4dec4423743247e0 - Init COMPLETE

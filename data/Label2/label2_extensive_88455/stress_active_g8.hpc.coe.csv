@@ -1,0 +1,3 @@
+timestamp,hostname,stress_active,tool
+1791768736.801664659,g8.hpc.coe,1,ib_write_bw
+1791768860.049295369,g8.hpc.coe,0,ib_write_bw

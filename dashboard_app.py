@@ -10,7 +10,7 @@ Data layout expected (relative to this script):
     data/
         Label0/   telemetry_<node>_<jobid>_label0.csv   (healthy)
         Label1/   telemetry_<node>_<jobid>_label1.csv   (allreduce_pause)
-        Label2/   telemetry_<node>_<jobid>_label2.csv   (network_stall)
+        Label2/   telemetry_<node>_<jobid>_label2.csv   (IB contention)
         Label5/   telemetry_<node>_<jobid>_label5.csv   (idle)
 
 Key CSV columns (0-indexed):
@@ -27,6 +27,7 @@ Key CSV columns (0-indexed):
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -58,10 +59,10 @@ LABEL_CONFIG: dict[int, dict] = {
     },
     2: {
         "folder": "Label2",
-        "name": "Network Stall",
-        "short": "network_stall",
+        "name": "IB Network Contention",
+        "short": "ib_contention",
         "color": "#ef4444",
-        "description": "Sustained GPU util 0%, IB backpressure elevated",
+        "description": "IB transmit waiting rises and DDP steps slow during contention",
     },
     5: {
         "folder": "Label5",
@@ -74,10 +75,29 @@ LABEL_CONFIG: dict[int, dict] = {
 
 # Metric definitions: (csv_column_name, display_name, y-axis label)
 METRICS = [
-    ("gpu_util_pct",            "GPU Utilization",        "GPU util (%)"),
-    ("ib_port_xmit_data_delta", "Data Sent Rate",         "xmit_data_delta"),
-    ("ib_port_xmit_wait_delta", "Congestion Backpressure","xmit_wait_delta"),
+    ("gpu_util_pct",            "GPU Utilization",                    "GPU util (%)"),
+    ("ib_port_xmit_data_delta", "IB Traffic Volume (communication activity)", "bytes sent / poll"),
+    ("ib_port_xmit_packets_delta", "IB Packet Activity (communication activity)", "packets / poll"),
+    ("ib_port_xmit_wait_delta", "IB Transmit Wait / Backpressure (contention signal)", "waiting events / poll"),
+    ("step_time_ms",             "DDP Training Step Time",             "step time (ms)"),
 ]
+
+# Label 2's primary story is contention → network waiting → training impact.
+# Keep the drilldown focused on three charts; traffic and packet counters
+# remain available in the comparison tab and statistics table.
+LABEL2_PRIMARY_METRICS = [
+    ("ib_port_xmit_wait_delta", "IB Transmit Wait / Backpressure (contention signal)", "waiting events / poll"),
+    ("step_time_ms", "DDP Training Step Time (impact)", "step time (ms)"),
+    ("gpu_util_pct", "GPU Utilization (context)", "GPU util (%)"),
+]
+
+LABEL1_PRIMARY_METRICS = [
+    ("step_time_ms", "DDP Training Step Time (sync-pause impact)", "step time (ms)"),
+    ("gpu_util_pct", "GPU Utilization (context)", "GPU util (%)"),
+    ("ib_port_xmit_wait_delta", "IB Transmit Wait / Backpressure (context)", "waiting events / poll"),
+]
+
+NODE_COLORS = ["#2563eb", "#0f766e", "#c2410c", "#7c3aed", "#64748b"]
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -164,27 +184,235 @@ st.markdown("""
 # Data loading
 # ---------------------------------------------------------------------------
 
-@st.cache_data(show_spinner=False)
-def load_label_data(label_num: int) -> pd.DataFrame:
-    """Load all CSVs for a given label number. Returns empty DataFrame if folder missing."""
+def _label_dirs(label_num: int) -> list[Path]:
+    """Return supported data directories without requiring a fixed layout."""
     cfg = LABEL_CONFIG[label_num]
-    folder = BASE_DIR / "data" / cfg["folder"]
+    candidates = [
+        BASE_DIR / "data" / cfg["folder"],
+        BASE_DIR / "data" / cfg["folder"].lower(),
+        BASE_DIR / f"Label_{label_num}_Data",
+    ]
+    candidates.extend(sorted(BASE_DIR.glob(f"*Label_{label_num}_Data")))
+    return list(dict.fromkeys(d for d in candidates if d.is_dir()))
 
-    # Also check legacy layout at repo root (e.g. 34662-Label_0_Data)
-    legacy_candidates = sorted(BASE_DIR.glob(f"*Label_{label_num}_Data"))
 
-    if not folder.exists() and not legacy_candidates:
+def _normalise_frame(df: pd.DataFrame, source_name: str, label_num: int) -> pd.DataFrame:
+    """Normalise uploaded/repository CSVs while preserving unknown columns."""
+    cfg = LABEL_CONFIG[label_num]
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    df["_source_file"] = source_name
+
+    aliases = {
+        "gpu_utilization": "gpu_util_pct",
+        "gpu_util": "gpu_util_pct",
+        "ib_xmit_data_delta": "ib_port_xmit_data_delta",
+        "ib_xmit_wait_delta": "ib_port_xmit_wait_delta",
+        "ib_xmit_packets_delta": "ib_port_xmit_packets_delta",
+        "step_time": "step_time_ms",
+    }
+    for old, new in aliases.items():
+        if old in df.columns and new not in df.columns:
+            df[new] = df[old]
+
+    numeric_cols = [
+        "timestamp", "gpu_util_pct", "ib_port_xmit_data_delta",
+        "ib_port_xmit_packets_delta", "ib_port_xmit_wait_delta",
+        "ib_symbol_error_delta", "ib_sq_num_rnr_delta", "step_time_ms",
+        "stress_active",
+    ]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Ignore marker/log CSVs accidentally copied into a telemetry folder.
+    has_telemetry = "timestamp" in df.columns and any(
+        c in df.columns for c in ("node_id", "gpu_util_pct", "ib_port_xmit_data_delta")
+    )
+    if not has_telemetry:
         return pd.DataFrame()
 
-    search_dirs = [folder] if folder.exists() else legacy_candidates
+    if "timestamp" in df.columns:
+        df["ts"] = pd.to_datetime(df["timestamp"], unit="s", errors="coerce")
+        df["ts_rel"] = df.groupby("_source_file")["timestamp"].transform(
+            lambda s: s - s.min()
+        )
 
-    frames: list[pd.DataFrame] = []
-    for d in search_dirs:
-        for csv_path in sorted(d.glob("*.csv")):
+    if "node_id" in df.columns:
+        df["node"] = df["node_id"].astype(str).str.replace(r"\..*", "", regex=True)
+    else:
+        extracted = df["_source_file"].str.extract(r"(?:telemetry_)?(g\d+)", expand=False)
+        df["node"] = extracted.fillna("unknown")
+
+    df["label_num"] = label_num
+    df["label_name"] = cfg["name"]
+    df["label_color"] = cfg["color"]
+    return df
+
+
+def _attach_stress_intervals(data: pd.DataFrame, search_dirs: list[Path]) -> pd.DataFrame:
+    """Attach Label 2 ground-truth stress phases from stress_active CSVs."""
+    if data.empty or "timestamp" not in data.columns:
+        return data
+
+    data = data.copy()
+    if "stress_active" not in data.columns:
+        data["stress_active"] = 0
+    data["stress_active"] = data["stress_active"].fillna(0).astype(int)
+
+    for directory in search_dirs:
+        for marker_path in sorted(directory.glob("stress_active_*.csv")):
             try:
-                df = pd.read_csv(csv_path, low_memory=False)
-                df["_source_file"] = csv_path.name
-                frames.append(df)
+                markers = pd.read_csv(marker_path)
+                markers["timestamp"] = pd.to_numeric(markers["timestamp"], errors="coerce")
+                markers = markers.dropna(subset=["timestamp"])
+                if markers.empty:
+                    continue
+                host = str(markers.get("hostname", pd.Series([marker_path.stem])).iloc[0])
+                short_host = host.split(".")[0]
+                starts = markers.loc[markers["stress_active"] == 1, "timestamp"]
+                ends = markers.loc[markers["stress_active"] == 0, "timestamp"]
+                if starts.empty or ends.empty:
+                    continue
+                start = float(starts.min())
+                end = float(ends.max())
+                mask = (
+                    (data["node"].astype(str) == short_host)
+                    & (data["timestamp"] >= start)
+                    & (data["timestamp"] <= end)
+                )
+                data.loc[mask, "stress_active"] = 1
+            except Exception:
+                continue
+
+    data["phase"] = data["stress_active"].map({1: "Stress", 0: "Non-stress"})
+    return data
+
+
+def _load_step_time(search_dirs: list[Path], label_num: int) -> list[pd.DataFrame]:
+    """Load optional DDP step-time CSVs for any label.
+
+    Step time is printed by the DDP workload logs, not by the NIC poller.
+    The analyzer writes files such as ``step_time_91062.csv`` with columns
+    ``timestamp,node,step,step_time_ms``.  The node is often ``rank0`` because
+    rank 0 emits the timing line for the distributed job; it is therefore a
+    global training signal rather than a per-worker NIC measurement.
+    """
+    frames: list[pd.DataFrame] = []
+    for directory in search_dirs:
+        paths = sorted(directory.glob("step_time_*.csv"))
+        paths += sorted(directory.glob("ddp_step_time_*.csv"))
+        for csv_path in paths:
+            try:
+                raw = pd.read_csv(csv_path, low_memory=False)
+                raw.columns = [str(c).strip() for c in raw.columns]
+                aliases = {
+                    "step_time": "step_time_ms",
+                    "step_time_msec": "step_time_ms",
+                    "time": "timestamp",
+                }
+                for old, new in aliases.items():
+                    if old in raw.columns and new not in raw.columns:
+                        raw[new] = raw[old]
+                if "timestamp" not in raw.columns or "step_time_ms" not in raw.columns:
+                    continue
+
+                frame = pd.DataFrame({
+                    "timestamp": pd.to_numeric(raw["timestamp"], errors="coerce"),
+                    "step_time_ms": pd.to_numeric(raw["step_time_ms"], errors="coerce"),
+                })
+                if "node" in raw.columns:
+                    frame["node"] = raw["node"].astype(str).str.strip()
+                elif "hostname" in raw.columns:
+                    frame["node"] = raw["hostname"].astype(str).str.strip()
+                else:
+                    match = re.search(r"(g\d+)", csv_path.name)
+                    frame["node"] = match.group(1) if match else "global"
+
+                frame["node"] = frame["node"].replace({"nan": "rank0", "": "rank0"})
+
+                frame = frame.dropna(subset=["timestamp", "step_time_ms"])
+                if frame.empty:
+                    continue
+                frame["_source_file"] = csv_path.name
+                frame["ts"] = pd.to_datetime(frame["timestamp"], unit="s", errors="coerce")
+                frame["ts_rel"] = frame["timestamp"] - frame["timestamp"].min()
+                frame["_source_type"] = "step_time"
+                frame["label_num"] = label_num
+                frame["label_name"] = LABEL_CONFIG[label_num]["name"]
+                frame["label_color"] = LABEL_CONFIG[label_num]["color"]
+                frames.append(frame)
+            except Exception:
+                continue
+    return frames
+
+
+# Backward-compatible name for any code that imported the previous helper.
+def _load_label2_step_time(search_dirs: list[Path]) -> list[pd.DataFrame]:
+    return _load_step_time(search_dirs, 2)
+
+
+def _attach_label1_intervals(data: pd.DataFrame, search_dirs: list[Path]) -> pd.DataFrame:
+    """Attach Label 1 synchronization-pause markers to telemetry and timing rows."""
+    if data.empty or "timestamp" not in data.columns:
+        return data
+
+    data = data.copy()
+    if "label1_active" not in data.columns:
+        data["label1_active"] = 0
+    data["label1_active"] = pd.to_numeric(data["label1_active"], errors="coerce").fillna(0).astype(int)
+
+    for directory in search_dirs:
+        for marker_path in sorted(directory.glob("label1_active_*.csv")):
+            try:
+                markers = pd.read_csv(marker_path)
+                markers["timestamp"] = pd.to_numeric(markers["timestamp"], errors="coerce")
+                markers["label1_active"] = pd.to_numeric(markers["label1_active"], errors="coerce")
+                markers = markers.dropna(subset=["timestamp", "label1_active"]).sort_values("timestamp")
+                if markers.empty:
+                    continue
+
+                host = str(markers.get("hostname", pd.Series([marker_path.stem])).iloc[0])
+                short_host = host.split(".")[0]
+                starts = markers.loc[markers["label1_active"] == 1, "timestamp"].tolist()
+                ends = markers.loc[markers["label1_active"] == 0, "timestamp"].tolist()
+                intervals = []
+                for start in starts:
+                    end = next((candidate for candidate in ends if candidate >= start), None)
+                    if end is not None:
+                        intervals.append((float(start), float(end)))
+
+                telemetry_mask = data["node"].astype(str).eq(short_host)
+                step_mask = data.get("_source_type", pd.Series("", index=data.index)).eq("step_time")
+                for start, end in intervals:
+                    active_mask = (
+                        (data["timestamp"] >= start)
+                        & (data["timestamp"] <= end)
+                        & (telemetry_mask | step_mask)
+                    )
+                    data.loc[active_mask, "label1_active"] = 1
+            except Exception:
+                continue
+
+    data["phase"] = data["label1_active"].map({1: "Sync pause", 0: "Normal"})
+    return data
+
+
+@st.cache_data(show_spinner=False)
+def load_label_data(label_num: int) -> pd.DataFrame:
+    """Load telemetry CSVs for a label and attach Label 2 stress phases."""
+    search_dirs = _label_dirs(label_num)
+    frames: list[pd.DataFrame] = []
+    for directory in search_dirs:
+        for csv_path in sorted(directory.glob("*.csv")):
+            if csv_path.name.startswith("stress_active_"):
+                continue
+            try:
+                frame = _normalise_frame(
+                    pd.read_csv(csv_path, low_memory=False), csv_path.name, label_num
+                )
+                if not frame.empty:
+                    frames.append(frame)
             except Exception:
                 continue
 
@@ -192,40 +420,31 @@ def load_label_data(label_num: int) -> pd.DataFrame:
         return pd.DataFrame()
 
     data = pd.concat(frames, ignore_index=True)
-
-    # Normalise numeric columns
-    numeric_cols = [
-        "timestamp", "gpu_util_pct",
-        "ib_port_xmit_data_delta", "ib_port_xmit_wait_delta",
-        "ib_symbol_error_delta", "ib_sq_num_rnr_delta",
-    ]
-    for col in numeric_cols:
-        if col in data.columns:
-            data[col] = pd.to_numeric(data[col], errors="coerce")
-
-    # Derive timestamps
-    if "timestamp" in data.columns:
-        data["ts"] = pd.to_datetime(data["timestamp"], unit="s", errors="coerce")
-        # Fallback: treat as seconds-since-start per file so charts always have a valid x-axis
-        data["ts_rel"] = data.groupby("_source_file")["timestamp"].transform(
-            lambda s: s - s.min()
-        )
-
-    # Node short name
-    if "node_id" in data.columns:
-        data["node"] = (
-            data["node_id"]
-            .astype(str)
-            .str.replace(r"\..*", "", regex=True)   # strip FQDN
-        )
-    else:
-        data["node"] = data["_source_file"].str.extract(r"telemetry_(\w+)_")[0].fillna("unknown")
-
-    data["label_num"] = label_num
-    data["label_name"] = cfg["name"]
-    data["label_color"] = cfg["color"]
-
+    step_frames = _load_step_time(search_dirs, label_num)
+    if step_frames:
+        data = pd.concat([data, *step_frames], ignore_index=True)
+    if label_num == 1:
+        data = _attach_label1_intervals(data, search_dirs)
+    if label_num == 2:
+        data = _attach_stress_intervals(data, search_dirs)
     return data
+
+
+def load_uploaded_label2(uploaded_files) -> pd.DataFrame:
+    """Load CSVs supplied through the sidebar uploader as Label 2 telemetry."""
+    frames = []
+    for uploaded in uploaded_files or []:
+        if uploaded.name.startswith("stress_active_"):
+            continue
+        try:
+            frame = _normalise_frame(pd.read_csv(uploaded, low_memory=False), uploaded.name, 2)
+            if not frame.empty:
+                frames.append(frame)
+        except Exception:
+            continue
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
 
 def get_nodes(df: pd.DataFrame) -> list[str]:
     if df.empty or "node" not in df.columns:
@@ -260,6 +479,52 @@ def _make_time_axis(df: pd.DataFrame) -> pd.Series:
     return df.get("ts_rel", pd.Series(range(len(df)), index=df.index))
 
 
+def _add_stress_regions(fig: go.Figure, df: pd.DataFrame) -> None:
+    """Shade known Label 2 stress samples so the causal interval is obvious."""
+    if "stress_active" not in df.columns or "timestamp" not in df.columns:
+        return
+    active = df[df["stress_active"] == 1]
+    if active.empty:
+        return
+    start = active["timestamp"].min()
+    end = active["timestamp"].max()
+    x0 = pd.to_datetime(start, unit="s", errors="coerce")
+    x1 = pd.to_datetime(end, unit="s", errors="coerce")
+    if pd.notna(x0) and pd.notna(x1):
+        fig.add_vrect(
+            x0=x0,
+            x1=x1,
+            fillcolor="#ef4444",
+            opacity=0.10,
+            line_width=0,
+            annotation_text="IB stress",
+            annotation_position="top left",
+        )
+
+
+def _add_label1_regions(fig: go.Figure, df: pd.DataFrame) -> None:
+    """Shade Label 1 synchronization-pause intervals."""
+    if "label1_active" not in df.columns or "timestamp" not in df.columns:
+        return
+    active = df[df["label1_active"] == 1]
+    if active.empty:
+        return
+    start = active["timestamp"].min()
+    end = active["timestamp"].max()
+    x0 = pd.to_datetime(start, unit="s", errors="coerce")
+    x1 = pd.to_datetime(end, unit="s", errors="coerce")
+    if pd.notna(x0) and pd.notna(x1):
+        fig.add_vrect(
+            x0=x0,
+            x1=x1,
+            fillcolor="#f59e0b",
+            opacity=0.14,
+            line_width=0,
+            annotation_text="sync pause",
+            annotation_position="top left",
+        )
+
+
 def build_single_label_charts(df: pd.DataFrame, node_sel: str, label_num: int) -> None:
     """Tab 1 — Three stacked charts for a single label / node selection."""
     cfg = LABEL_CONFIG[label_num]
@@ -270,20 +535,44 @@ def build_single_label_charts(df: pd.DataFrame, node_sel: str, label_num: int) -
         return
 
     # Group by node for "All nodes" case — one trace per node
-    groups = (
-        node_df.groupby("node")
-        if node_sel == "All nodes"
-        else [(node_sel, node_df)]
-    )
-
     x_label = "Time" if "ts" in node_df.columns and node_df["ts"].notna().any() else "Seconds since start"
 
-    palette = ["#4f8ef7", "#f59e0b", "#22c55e", "#8b5cf6", "#ef4444"]
+    palette = NODE_COLORS
+    if label_num == 2:
+        metric_specs = LABEL2_PRIMARY_METRICS
+    elif label_num == 1:
+        metric_specs = LABEL1_PRIMARY_METRICS
+    else:
+        metric_specs = [spec for spec in METRICS if spec[0] != "step_time_ms"]
 
-    for metric_col, metric_name, y_label in METRICS:
-        if metric_col not in node_df.columns:
-            st.caption(f"⚠ Column `{metric_col}` not found in data — skipping.")
+    for metric_col, metric_name, y_label in metric_specs:
+        if metric_col not in node_df.columns or node_df[metric_col].notna().sum() == 0:
+            if metric_col == "step_time_ms" and label_num in (1, 2):
+                st.info(
+                    "DDP Training Step Time is not available in the loaded telemetry. "
+                    "Add a `step_time_*.csv` file with timestamp, node, and step_time_ms columns."
+                )
             continue
+
+        # DDP timing is normally emitted only by rank 0.  It is a global
+        # training signal, so keep showing it when a worker node is selected
+        # instead of incorrectly reporting an empty chart for g8/g11.
+        chart_df = node_df
+        global_step_time = False
+        if metric_col == "step_time_ms":
+            chart_df = node_df[node_df[metric_col].notna()].copy()
+            if chart_df.empty:
+                chart_df = df[df[metric_col].notna()].copy()
+                global_step_time = not chart_df.empty
+
+        if chart_df.empty:
+            continue
+
+        groups = (
+            chart_df.groupby("node")
+            if node_sel == "All nodes" or metric_col == "step_time_ms"
+            else [(node_sel, chart_df)]
+        )
 
         fig = go.Figure()
 
@@ -305,9 +594,32 @@ def build_single_label_charts(df: pd.DataFrame, node_sel: str, label_num: int) -
             title=f"{metric_name}  —  {cfg['name']}",
             yaxis_title=y_label,
             xaxis_title=x_label,
+            legend_title_text="Node",
             **CHART_TEMPLATE,
         )
+        if label_num == 2:
+            _add_stress_regions(fig, node_df)
+        elif label_num == 1:
+            _add_label1_regions(fig, node_df)
         st.plotly_chart(fig, use_container_width=True)
+
+        if metric_col == "step_time_ms":
+            st.caption(
+                "DDP step time is emitted by rank 0 for the distributed job. "
+                + ("It is shown globally for the selected worker node." if global_step_time else "")
+            )
+
+    if label_num == 2:
+        st.caption(
+            "Reading Label 2: the red shaded interval is the known IB stress period. "
+            "Colored lines identify nodes; they do not represent different labels or severity levels. "
+            "The primary evidence is higher network waiting together with slower DDP step time."
+        )
+    elif label_num == 1:
+        st.caption(
+            "Label 1 timing is a controlled synchronization-pause signal. "
+            "Amber regions mark the recorded pause intervals; they are not InfiniBand fabric congestion."
+        )
 
 
 def build_comparison_charts(
@@ -348,8 +660,14 @@ def build_comparison_charts(
             hovertemplate=f"t=%{{x:.1f}}s<br>{metric_name}: %{{y:,.1f}}<extra>{cfg['name']}</extra>",
         ))
 
+    if len(selected_labels) == 1:
+        only_label = LABEL_CONFIG[selected_labels[0]]
+        chart_title = f"{metric_name}  —  {only_label['name']}"
+    else:
+        chart_title = f"{metric_name}  —  Label comparison (median across nodes)"
+
     fig.update_layout(
-        title=f"{metric_name}  —  Label comparison (median across nodes)",
+        title=chart_title,
         yaxis_title=y_label,
         xaxis_title="Seconds since start",
         **CHART_TEMPLATE,
@@ -371,6 +689,10 @@ def build_stats_table(loaded_data: dict[int, pd.DataFrame], selected_labels: lis
                 "avg_gpu_util": "—",
                 "avg_xmit_data": "—",
                 "avg_xmit_wait": "—",
+                "peak_xmit_wait": "—",
+                "avg_step_time": "—",
+                "peak_step_time": "—",
+                "stress_rows": "—",
             })
             continue
 
@@ -387,6 +709,21 @@ def build_stats_table(loaded_data: dict[int, pd.DataFrame], selected_labels: lis
             "avg_gpu_util": _fmt("gpu_util_pct"),
             "avg_xmit_data": _fmt("ib_port_xmit_data_delta", ",.0f"),
             "avg_xmit_wait": _fmt("ib_port_xmit_wait_delta", ",.0f"),
+            "peak_xmit_wait": (
+                f"{df['ib_port_xmit_wait_delta'].max():,.0f}"
+                if "ib_port_xmit_wait_delta" in df.columns
+                and df["ib_port_xmit_wait_delta"].notna().any() else "—"
+            ),
+            "avg_step_time": _fmt("step_time_ms"),
+            "peak_step_time": (
+                f"{df['step_time_ms'].max():.1f}"
+                if "step_time_ms" in df.columns
+                and df["step_time_ms"].notna().any() else "—"
+            ),
+            "stress_rows": (
+                f"{int((df['stress_active'] == 1).sum()):,}"
+                if "stress_active" in df.columns else "—"
+            ),
         })
 
     # Build HTML table
@@ -399,6 +736,10 @@ def build_stats_table(loaded_data: dict[int, pd.DataFrame], selected_labels: lis
         <th>Avg GPU util (%)</th>
         <th>Avg xmit_data_delta</th>
         <th>Avg xmit_wait_delta</th>
+        <th>Peak xmit_wait_delta</th>
+        <th>Avg DDP step (ms)</th>
+        <th>Peak DDP step (ms)</th>
+        <th>Stress rows</th>
     </tr></thead><tbody>
     """
     body = ""
@@ -412,6 +753,10 @@ def build_stats_table(loaded_data: dict[int, pd.DataFrame], selected_labels: lis
             <td>{r["avg_gpu_util"]}</td>
             <td>{r["avg_xmit_data"]}</td>
             <td>{r["avg_xmit_wait"]}</td>
+            <td>{r["peak_xmit_wait"]}</td>
+            <td>{r["avg_step_time"]}</td>
+            <td>{r["peak_step_time"]}</td>
+            <td>{r["stress_rows"]}</td>
         </tr>"""
     return header + body + "</tbody></table>"
 
@@ -442,8 +787,25 @@ def main() -> None:
             if not df.empty:
                 available_labels.append(lnum)
 
+        st.markdown("### Add Label 2 CSVs")
+        uploaded_label2 = st.file_uploader(
+            "Upload Label 2 telemetry CSVs",
+            type=["csv"],
+            accept_multiple_files=True,
+            help=(
+                "Upload telemetry_*.csv files. Optional stress_active_*.csv "
+                "files can be kept in the same data/Label2 folder for phase shading."
+            ),
+        )
+        uploaded_df = load_uploaded_label2(uploaded_label2)
+        if not uploaded_df.empty:
+            loaded_data[2] = pd.concat([loaded_data.get(2, pd.DataFrame()), uploaded_df], ignore_index=True)
+            if 2 not in available_labels:
+                available_labels.append(2)
+            st.success(f"Loaded {len(uploaded_df):,} uploaded Label 2 rows.")
+
         if not available_labels:
-            st.error("No data found. Expected `data/Label0/`, `data/Label1/`, etc. relative to this script.")
+            st.error("No data found. Add CSVs under `data/Label0/`, `data/Label2/`, etc., or upload Label 2 telemetry above.")
             st.stop()
 
         # ── Tab 1 controls ──────────────────────────────────────────────────
@@ -494,16 +856,28 @@ def main() -> None:
         df = loaded_data[lnum]
         cfg = LABEL_CONFIG[lnum]
         avg_gpu = f"{df['gpu_util_pct'].mean():.1f}%" if not df.empty and "gpu_util_pct" in df.columns else "—"
+        avg_wait = (
+            f"{df['ib_port_xmit_wait_delta'].mean():,.0f}"
+            if not df.empty and "ib_port_xmit_wait_delta" in df.columns else "—"
+        )
         n_nodes = df["node"].nunique() if not df.empty else 0
         with col:
+            if lnum == 2:
+                main_value = avg_wait
+                main_label = "avg IB transmit wait"
+                subline = f"GPU util {avg_gpu} · {n_nodes} node(s)"
+            else:
+                main_value = avg_gpu
+                main_label = "avg GPU utilization"
+                subline = f"IB data rows · {n_nodes} node(s)"
             st.markdown(f"""
             <div class="stat-card">
                 <div class="label">
                     <span class="label-badge" style="background:{cfg['color']};font-size:0.7rem">{lnum}</span>
                     {cfg['name']}
                 </div>
-                <div class="value">{avg_gpu}</div>
-                <div class="sub">avg GPU util · {n_nodes} node(s)</div>
+                <div class="value">{main_value}</div>
+                <div class="sub">{main_label} · {subline}</div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -531,6 +905,32 @@ def main() -> None:
             unsafe_allow_html=True,
         )
 
+        if selected_label == 2:
+            stress_rows = int((df_sel.get("stress_active", pd.Series(dtype=int)) == 1).sum())
+            st.markdown("### Label 2: what the charts mean")
+            st.info(
+                "Label 2 means InfiniBand contention affecting distributed training. "
+                "The three charts below show the contention signal, its training impact, "
+                "and GPU context. The red shaded interval is when additional RDMA traffic was active."
+            )
+            if stress_rows:
+                st.info(
+                    f"Label 2 ground truth: {stress_rows:,} telemetry rows fall inside a known "
+                    "IB stress interval. Focus on network waiting and DDP step time; "
+                    "GPU utilization may remain high."
+                )
+            else:
+                st.warning(
+                    "No stress_active markers were found for this Label 2 data. "
+                    "Charts still render, but the stress interval cannot be shaded."
+                )
+        elif selected_label == 1:
+            st.info(
+                "Label 1 still uses InfiniBand: DDP AllReduce produces normal traffic and packets. "
+                "The Label 1 signature is periodic DDP step-time spikes without sustained "
+                "IB transmit-wait/backpressure like Label 2."
+            )
+
         build_single_label_charts(df_sel, selected_node, selected_label)
 
     # ====================================================================
@@ -552,18 +952,66 @@ def main() -> None:
             if not has_rel:
                 st.warning("Relative timestamps could not be computed — check that `timestamp` column exists.")
             else:
+                # Keep DDP timing out of the mixed telemetry stack.  It is a
+                # training-level signal with a different source and duration
+                # than the NIC poller, so it is clearer in separate charts.
                 for metric_col, metric_name, y_label in METRICS:
+                    if metric_col == "step_time_ms":
+                        continue
+                    has_metric = any(
+                        not loaded_data[lnum].empty
+                        and metric_col in loaded_data[lnum].columns
+                        and loaded_data[lnum][metric_col].notna().any()
+                        for lnum in compare_labels
+                    )
+                    if not has_metric:
+                        continue
                     fig = build_comparison_charts(
                         loaded_data, compare_labels, metric_col, metric_name, y_label
                     )
                     st.plotly_chart(fig, use_container_width=True)
 
+                step_labels = [
+                    lnum
+                    for lnum in compare_labels
+                    if not loaded_data[lnum].empty
+                    and "step_time_ms" in loaded_data[lnum].columns
+                    and loaded_data[lnum]["step_time_ms"].notna().any()
+                ]
+
+                st.markdown("### DDP Training Step Time — shown separately")
+                if not step_labels:
+                    st.info(
+                        "No step_time_*.csv file was found for the selected labels. "
+                        "Place the generated DDP step-time CSV inside the matching label folder."
+                    )
+                else:
+                    for lnum in step_labels:
+                        cfg = LABEL_CONFIG[lnum]
+                        fig = build_comparison_charts(
+                            loaded_data,
+                            [lnum],
+                            "step_time_ms",
+                            "DDP Training Step Time",
+                            "step time (ms)",
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                        if lnum == 1:
+                            st.caption(
+                                "Label 1 only: periodic spikes show the controlled synchronization pause. "
+                                "This chart is not overlaid with Label 2."
+                            )
+                        elif lnum == 2:
+                            st.caption(
+                                "Label 2 only: step-time elevation is shown separately from Label 1."
+                            )
+
                 st.markdown("""
                 **Reading this chart:**
-                - **Healthy (green):** GPU util stays near 100%, xmit_data is high and sustained.
-                - **AllReduce Pause (amber):** Brief GPU dip at collective sync points, xmit_data drops momentarily.
-                - **Network Stall (red):** GPU util collapses to 0%, xmit_wait spikes — traffic is queued.
-                - **Idle (gray):** GPU util 0%, xmit_data near zero — no training job running.
+                - **Healthy (green):** GPU and communication activity are stable for the workload.
+                - **AllReduce Pause (amber):** DDP still sends AllReduce traffic, but has brief synchronization-related step-time spikes without sustained backpressure.
+                - **IB Network Contention (red):** `xmit_wait_delta` rises because the NIC waits for network credits; DDP step time may increase. GPU utilization can remain high.
+                - **Idle (gray):** GPU utilization and IB traffic are near zero.
                 """)
 
     # ====================================================================

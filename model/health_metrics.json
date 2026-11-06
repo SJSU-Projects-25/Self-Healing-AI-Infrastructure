@@ -1,0 +1,115 @@
+{
+  "evaluation": "leave-one-complete-run-out",
+  "runtime": {
+    "python": "3.11.9",
+    "scikit_learn": "1.7.2",
+    "joblib": "1.5.2"
+  },
+  "classes": {
+    "0": "healthy",
+    "1": "allreduce_pause",
+    "2": "ib_contention"
+  },
+  "rows_total": 18493,
+  "class_counts": {
+    "healthy": 16408,
+    "allreduce_pause": 109,
+    "ib_contention": 1976
+  },
+  "runs_by_source": {
+    "label0": [
+      "label0_telemetry_g11.hpc.coe_34662_label0",
+      "label0_telemetry_g4.hpc.coe_34662_label0",
+      "label0_telemetry_g5.hpc.coe_34662_label0"
+    ],
+    "label1": [
+      "label1_105262",
+      "label1_91086"
+    ],
+    "label2": [
+      "label2_extensive_105175",
+      "label2_extensive_88335",
+      "label2_extensive_88455",
+      "label2_extensive_90538"
+    ]
+  },
+  "label2_runs_skipped_missing_markers": [
+    "label2_extensive_105153",
+    "label2_extensive_88334",
+    "label2_extensive_88339",
+    "label2_extensive_88486",
+    "label2_extensive_90537"
+  ],
+  "features": [
+    "gpu_util_pct",
+    "gpu_mem_used_mb",
+    "ib_port_xmit_data_delta",
+    "ib_port_rcv_data_delta",
+    "ib_port_xmit_packets_delta",
+    "ib_port_rcv_packets_delta",
+    "ib_port_xmit_wait_delta",
+    "ib_port_xmit_discards_delta",
+    "ib_sq_num_rnr_delta",
+    "ib_sq_num_to_delta",
+    "ddp_step_time_ms",
+    "gpu_util_pct_change",
+    "ib_port_xmit_data_delta_change",
+    "ib_port_xmit_packets_delta_change",
+    "ib_port_xmit_wait_delta_change",
+    "ddp_step_time_ms_change"
+  ],
+  "evaluation_results": {
+    "folds_evaluated": 9,
+    "rows_evaluated": 18493,
+    "confusion_matrix": [
+      [
+        16390,
+        17,
+        1
+      ],
+      [
+        24,
+        85,
+        0
+      ],
+      [
+        49,
+        0,
+        1927
+      ]
+    ],
+    "classification_report": {
+      "healthy": {
+        "precision": 0.9955658142501367,
+        "recall": 0.9989029741589469,
+        "f1-score": 0.9972316023242371,
+        "support": 16408.0
+      },
+      "allreduce_pause": {
+        "precision": 0.8333333333333334,
+        "recall": 0.7798165137614679,
+        "f1-score": 0.8056872037914692,
+        "support": 109.0
+      },
+      "ib_contention": {
+        "precision": 0.9994813278008299,
+        "recall": 0.9752024291497976,
+        "f1-score": 0.9871926229508197,
+        "support": 1976.0
+      },
+      "accuracy": 0.995079219164008,
+      "macro avg": {
+        "precision": 0.9427934917947667,
+        "recall": 0.9179739723567376,
+        "f1-score": 0.9300371430221753,
+        "support": 18493.0
+      },
+      "weighted avg": {
+        "precision": 0.9950279736810693,
+        "recall": 0.995079219164008,
+        "f1-score": 0.9950299388471406,
+        "support": 18493.0
+      }
+    }
+  }
+}

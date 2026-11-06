@@ -251,7 +251,7 @@ awk '{sum+=$1; count++; if($1>max) max=$1; if(min=="" || $1<min) min=$1}
 | Task #7 | Multi-node symmetry | Correlated counter changes across nodes | ✅ DONE |
 | Task #5 | Idle noise floor | Background Net_Xmit_Delta documented | ⏳ PENDING |
 | Task #8 | Poller robustness | No missing rows at job boundary | ⏳ PENDING |
-| Task #11 | Fault injection | Labeled dataset covering all 6 labels | ⏳ PENDING |
+| Task #11 | Fault injection | Labeled dataset covering all 6 labels | ⏳ IN PROGRESS |
  
 ---
  
@@ -263,13 +263,48 @@ The following fault scenarios are planned to generate labeled training data for 
 |---|---|---|---|
 | 0 | Healthy training | Normal data parallel training run | ✅ Done |
 | 1 | Normal AllReduce pause | Observed during training | ✅ Done |
-| 2 | Network-induced stall | Apptainer tc/netem delay | ⏳ Planned |
+| 2 | InfiniBand network contention | Concurrent `ib_write_bw` RDMA workload | ✅ Done |
 | 3 | Physical link error | Apptainer tc/netem loss | ⏳ Planned |
 | 4 | Compute fault | CUDA sync barrier delay | ⏳ Planned |
-| 5 | Idle | Poller with no data parallel training job | ⏳ Planned |
- 
+| 5 | Idle | Poller with no data parallel training job | ⚠️ Collected; validation pending |
+
 ---
- 
+
+## Current ML training
+
+The repository includes a reproducible training pipeline under
+[`model/`](model/). The current health model is a random forest with three
+classes:
+
+```text
+0 = healthy training
+1 = normal AllReduce pause
+2 = InfiniBand contention
+```
+
+The model uses GPU context, InfiniBand counter deltas, RDMA error deltas,
+aligned DDP step time, and past-only change features. It is evaluated by
+holding out complete experiment runs rather than randomly splitting adjacent
+telemetry rows.
+
+From the current offline evaluation:
+
+- Healthy F1: 99.72%
+- AllReduce-pause F1: 80.57%
+- InfiniBand-contention F1: 98.72%
+
+These results are a prototype benchmark, not production certification. Label
+5 is excluded because its current labeled files contain null timestamps and
+duplicate rows. Five Label 2 runs are excluded because they lack verified
+stress-marker intervals. Use the model documentation for training and
+conservative event aggregation:
+
+```bash
+python model/train_health.py
+```
+
+---
+
 ## How to Access the Dashboard
  
 The dashboard provides an interactive interface for exploring telemetry data and incident analysis.

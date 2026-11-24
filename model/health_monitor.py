@@ -13,10 +13,22 @@ try:
         CLASS_NAMES,
         DERIVED_FEATURES,
         HEALTH_FEATURES,
+        HISTORY_FEATURES,
+        RATE_FEATURES,
+        ROLLING_WINDOWS,
+        _add_history_features,
     )
     from .train_label2 import FEATURES
 except ImportError:
-    from train_health import CLASS_NAMES, DERIVED_FEATURES, HEALTH_FEATURES
+    from train_health import (
+        CLASS_NAMES,
+        DERIVED_FEATURES,
+        HEALTH_FEATURES,
+        HISTORY_FEATURES,
+        RATE_FEATURES,
+        ROLLING_WINDOWS,
+        _add_history_features,
+    )
     from train_label2 import FEATURES
 
 ISSUE_CLASSES = {1, 2}
@@ -24,11 +36,42 @@ ISSUE_CLASSES = {1, 2}
 
 def load_health_model(path: Path):
     """Load the fitted health pipeline from a trusted local path."""
-    return joblib.load(path)
+    model = joblib.load(path)
+    threshold = 0.5
+    metrics_path = path.parent / "health_metrics.json"
+    if metrics_path.exists():
+        import json
+
+        try:
+            metrics = json.loads(metrics_path.read_text())
+            top_level_threshold = metrics.get("allreduce_pause_threshold")
+            if isinstance(top_level_threshold, (int, float)):
+                threshold = float(top_level_threshold)
+            else:
+                nested_threshold = (
+                    metrics.get("evaluation_results", {})
+                    .get("allreduce_pause_threshold", {})
+                    .get("threshold", 0.5)
+                )
+                threshold = float(nested_threshold)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            threshold = 0.5
+    setattr(model, "allreduce_pause_threshold", threshold)
+    return model
 
 
-def classify_rows(model, telemetry: pd.DataFrame) -> pd.DataFrame:
+def classify_rows(
+    model,
+    telemetry: pd.DataFrame,
+    allreduce_pause_threshold: float | None = None,
+) -> pd.DataFrame:
     """Add row-level class and probability columns to telemetry."""
+    if allreduce_pause_threshold is None:
+        allreduce_pause_threshold = float(
+            getattr(model, "allreduce_pause_threshold", 0.5)
+        )
+    if not 0.0 <= allreduce_pause_threshold <= 1.0:
+        raise ValueError("allreduce_pause_threshold must be between 0 and 1.")
     missing = sorted(set(FEATURES) - set(telemetry.columns))
     if missing:
         raise ValueError(f"Telemetry is missing required features: {missing}")
@@ -48,8 +91,27 @@ def classify_rows(model, telemetry: pd.DataFrame) -> pd.DataFrame:
     for column in DERIVED_FEATURES:
         base = column.removesuffix("_change")
         result[column] = result[base] - groups[base].shift(1)
+    if "polling_interval_actual" in result.columns:
+        interval = pd.to_numeric(
+            result["polling_interval_actual"], errors="coerce"
+        )
+        for target, source in (
+            ("ib_xmit_wait_rate", "ib_port_xmit_wait_delta"),
+            ("ib_xmit_data_rate", "ib_port_xmit_data_delta"),
+            ("ib_xmit_packets_rate", "ib_port_xmit_packets_delta"),
+        ):
+            result[target] = result[source].div(interval.replace(0, np.nan))
+    else:
+        result[RATE_FEATURES] = np.nan
+    result = _add_history_features(result)
     probabilities = model.predict_proba(result[HEALTH_FEATURES])
     predictions = model.classes_[np.argmax(probabilities, axis=1)]
+    if 1 in model.classes_:
+        pause_index = int(np.flatnonzero(model.classes_ == 1)[0])
+        predictions = predictions.copy()
+        predictions[
+            probabilities[:, pause_index] >= allreduce_pause_threshold
+        ] = 1
     result["predicted_class"] = predictions.astype(int)
     result["predicted_state"] = [
         CLASS_NAMES[int(value)] for value in predictions

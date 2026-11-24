@@ -1,0 +1,97 @@
+{
+  "results_dir": "/home/018291533/lens_poc/results/label1_165416",
+  "rank0_log": "node_0_0.log",
+  "telemetry_files": [
+    "telemetry_g11.hpc.coe_165416.csv",
+    "telemetry_g8.hpc.coe_165416.csv"
+  ],
+  "marker_files": [
+    "label1_active_g11.hpc.coe.csv",
+    "label1_active_g8.hpc.coe.csv"
+  ],
+  "step_count": 10912,
+  "first_step": 1,
+  "last_step": 10912,
+  "window_seconds": 30.0,
+  "stride_seconds": 5.0,
+  "min_spike_ms": 100.0,
+  "class_label": "label1",
+  "profile_label": "rare",
+  "inferred_from_step_times": {
+    "baseline_step_time_ms": 21.212,
+    "spike_count": 27,
+    "spike_steps": [
+      400,
+      800,
+      1200,
+      1600,
+      2000,
+      2400,
+      2800,
+      3200,
+      3600,
+      4000,
+      4400,
+      4800,
+      5200,
+      5600,
+      6000,
+      6400,
+      6800,
+      7200,
+      7600,
+      8000,
+      8400,
+      8800,
+      9200,
+      9600,
+      10000,
+      10400,
+      10800
+    ],
+    "spike_time_mean_ms": 271.47685185185185,
+    "spike_time_p95_ms": 272.0587,
+    "spike_time_max_ms": 272.161,
+    "inferred_pause_every_steps": 400.0,
+    "spike_interval_steps_std": 0.0,
+    "inferred_spike_interval_seconds": 8.791592955589294,
+    "spike_interval_seconds_std": 0.027574451037164237,
+    "estimated_pause_duration_seconds": 0.250949
+  },
+  "ground_truth_marker_summary": {
+    "pause_event_count": 27,
+    "pause_duration_mean_seconds": 0.2699609950736717,
+    "pause_duration_min_seconds": 0.26870131492614746,
+    "pause_duration_max_seconds": 0.2706577777862549,
+    "configured_pause_seconds_mean": 0.25,
+    "configured_pause_every_steps": 400.0
+  },
+  "model_input_guidance": {
+    "use_as_features": [
+      "step_time_mean_ms",
+      "step_time_std_ms",
+      "step_time_p95_ms",
+      "step_time_max_ms",
+      "step_time_spike_count",
+      "step_time_spike_fraction",
+      "spike_interval_steps_mean",
+      "spike_interval_seconds_mean",
+      "gpu_util_node_min",
+      "gpu_util_node_max",
+      "gpu_util_node_range",
+      "ib_port_xmit_wait_delta_mean",
+      "ib_port_xmit_data_delta_mean",
+      "ib_port_xmit_packets_delta_mean"
+    ],
+    "do_not_use_as_features": [
+      "label1_active",
+      "pause_seconds",
+      "pause_step",
+      "pause_every",
+      "pause_rank",
+      "hostname",
+      "job_id",
+      "timestamp"
+    ]
+  }
+}

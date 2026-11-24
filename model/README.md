@@ -57,16 +57,21 @@ python model\train_health.py
 Outputs are `health_training_table.csv`, `health_random_forest.joblib`, and
 `health_metrics.json`. The evaluation holds out complete experiment runs.
 
-The current three-class evaluation uses 18,493 rows from nine complete runs:
+The strengthened three-class evaluation uses 47,983 rows from thirty-nine complete runs:
 
 | Class | Rows | Precision | Recall | F1 |
 |---|---:|---:|---:|---:|
-| Healthy | 16,408 | 99.56% | 99.89% | 99.72% |
-| AllReduce pause | 109 | 83.33% | 77.98% | 80.57% |
-| IB contention | 1,976 | 99.95% | 97.52% | 98.72% |
+| Healthy | 43,057 | 99.49% | 99.52% | 99.50% |
+| AllReduce pause | 2,950 | 93.14% | 93.46% | 93.30% |
+| IB contention | 1,976 | 99.74% | 98.63% | 99.19% |
+
+Overall accuracy is 99.11%, macro F1 is 97.33%, and weighted F1 is 99.11%.
+The AllReduce probability threshold was tuned from leave-one-run-out
+out-of-fold predictions and is 0.4724. The tuned threshold is saved with the
+model and loaded by `health_monitor.py`.
 
 These are offline, leave-one-run-out results. The AllReduce-pause class has
-only 109 rows from two experiments, and five Label 2 runs remain excluded
+2,950 rows from thirty-two experiments, and five Label 2 runs remain excluded
 because their stress markers are missing.
 
 ## Conservative event inference
@@ -89,6 +94,9 @@ the same node. This prevents one noisy row from triggering remediation.
 
 The health model's change features are calculated from the preceding sample
 within the same run and node. They do not use future rows or label metadata.
+The health model also adds 5-second and 30-second rolling history features.
+These use only preceding samples within the same run and node, including
+step-time mean/median/p95/max/spike statistics and supporting GPU/IB averages.
 
 Label 5 remains excluded: its current labeled files contain null timestamps
 and duplicate rows and must be repaired before training.

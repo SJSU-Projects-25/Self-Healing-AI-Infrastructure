@@ -305,6 +305,20 @@ python model/train_health.py
 
 ---
 
+## Test Outbound Telemetry Publishing
+
+Run on the cluster node you want to test. No packages required:
+
+```bash
+python3 src/http_probe.py
+# Or use your own endpoint:
+python3 src/http_probe.py https://your-server/telemetry
+```
+
+Defaults to `https://httpbin.org/post`, sending dummy metrics and printing
+the HTTP status and response. A connection failure or HTTP rejection exits
+with code 1. Test the accessible node and GPU workers separately.
+
 ## How to Access the Dashboard
  
 The dashboard provides an interactive interface for exploring telemetry data and incident analysis.
